@@ -352,12 +352,12 @@ Each of the 6 agents adheres to strict input/output contracts:
 
 ### 4.4 Graph Error Handling & Fallback Protocols
 
-#### 1. Missing Patient ID Handling
-- If `patient_id` is missing or invalid upon initiation, the graph router catches the error and halts execution at node `INTERRUPT_MISSING_PATIENT_ID`.
-- **System Action:** Status remains `PROCESSING` (breakpoint paused); Streamlit UI prompts the physician to select or create a valid patient record before proceeding.
+#### 1. Unresolved Patient Record Interrupt (`INTERRUPT_UNRESOLVED_PATIENT`)
+- If the provided `patient_id` / `patient_code` fails to resolve to a valid row in the `patients` table during the History Agent lookup, the graph router redirects state to `INTERRUPT_UNRESOLVED_PATIENT`.
+- **System Action:** Status remains `PROCESSING` (paused at interrupt node); Streamlit UI prompts the physician to search for an existing patient or create a new patient profile before execution resumes.
 
 #### 2. LLM Rate Limit / Timeout Handling
-- LLM calls (OpenAI API) execute via LangChain retry handler with exponential backoff (`max_retries=2`).
+- LLM calls execute with an initial attempt plus 2 exponential retries (`max_retries=2` / `stop_after_attempt=3`).
 - **Failure Transition:** If retries exhaust without success, the orchestrator sets `status = "FAILED"` and logs the exception. The UI displays an error notification giving the physician the option to retry execution or proceed with manual text editing.
 
 #### 3. Whisper Audio Transcription Failure
@@ -370,7 +370,7 @@ Each of the 6 agents adheres to strict input/output contracts:
 - **Fallback Action:** The UI prompts the physician to click **"Re-run Pipeline"** to restart execution from the raw transcript.
 
 #### 5. Database Downtime During Approval (`POST /approve`)
-- **Retry Policy:** The system executes 3 exponential retries (1s, 2s, 4s) to Supabase.
+- **Retry Policy:** The system executes 3 exponential retries (1s, 2s, 4s) via `tenacity` to Supabase.
 - **Exhaustion Handling:** If Supabase remains unreachable, return `503 Service Unavailable`.
 - **UI UX Recovery:** Streamlit displays a clear alert banner:
   > ⚠️ **Database Temporarily Unreachable:** Your edited clinical documentation is preserved in your active session. Please wait a moment and click **"Approve & Save"** again.
@@ -485,7 +485,8 @@ ai_clinical_documentation_assistant/
 │
 ├── specs/
 │   ├── idea.md                    <-- Requirements, problem statement & rubric scope
-│   └── design.md                  <-- Single Canonical Master Design Spec
+│   ├── design.md                  <-- Single Canonical Master Design Spec
+│   └── engineering.md             <-- Technical execution & developer guide
 │
 ├── backend/
 │   ├── agents/
@@ -497,7 +498,7 @@ ai_clinical_documentation_assistant/
 │   │   └── reviewer.py
 │   │
 │   ├── graph/
-│   │   ├── state.py
+│   │   ├── state.py               <-- EXCLUSIVE HOME for MedicalState TypedDict
 │   │   └── workflow.py
 │   │
 │   ├── memory/
@@ -508,7 +509,7 @@ ai_clinical_documentation_assistant/
 │   │   └── openai.py
 │   │
 │   ├── schemas/
-│   │   └── models.py
+│   │   └── models.py              <-- API Request/Response Pydantic models ONLY
 │   │
 │   ├── api/
 │   │   └── endpoints.py
@@ -518,9 +519,15 @@ ai_clinical_documentation_assistant/
 ├── frontend/
 │   └── streamlit_app.py
 │
+├── tests/
+│   ├── test_agents.py
+│   ├── test_graph.py
+│   └── test_api.py
+│
 ├── docs/
 │   └── architecture.png           <-- Architecture diagram export
 │
+├── .env.example
 ├── requirements.txt
 └── README.md
 ```

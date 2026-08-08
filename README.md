@@ -11,7 +11,8 @@ An AI multi-agent system that converts doctor–patient consultation information
 The project specifications are consolidated into the `specs/` directory:
 
 1. **[`specs/idea.md`](file:///c:/Users/aashv/OneDrive/Desktop/PROJECTS/ai_clinical_documentation_assistant/specs/idea.md)**: Problem analysis, business context, stakeholder requirements, design principles, and evaluation rubric.
-2. **[`specs/design.md`](file:///c:/Users/aashv/OneDrive/Desktop/PROJECTS/ai_clinical_documentation_assistant/specs/design.md)**: **Single Canonical Master Design Spec** containing:
+2. **[`specs/product.md`](file:///c:/Users/aashv/OneDrive/Desktop/PROJECTS/ai_clinical_documentation_assistant/specs/product.md)**: **Product & User Experience Specification** describing product vision, user personas, screen-by-screen workflow, and fallback user experiences.
+3. **[`specs/design.md`](file:///c:/Users/aashv/OneDrive/Desktop/PROJECTS/ai_clinical_documentation_assistant/specs/design.md)**: **Single Canonical Master Design Spec** containing:
    - Multi-agent LangGraph workflow diagram and execution strategy.
    - Database DDL schema (PostgreSQL / Supabase) & Row-Level Security (RLS) policies.
    - Pydantic JSON schemas and safety prompt guardrails for all 6 agents.
@@ -19,6 +20,16 @@ The project specifications are consolidated into the `specs/` directory:
    - FastAPI REST API contracts (including `/approve` and `/reject`).
    - Streamlit Human-in-the-Loop approval UI mockups.
    - Graph error handling, retry policies, and metadata-only HIPAA audit logging.
+4. **[`specs/engineering.md`](file:///c:/Users/aashv/OneDrive/Desktop/PROJECTS/ai_clinical_documentation_assistant/specs/engineering.md)**: **Engineering & Technical Execution Guide** containing:
+   - Environment setup, dependency installation, and local development setup.
+   - Directory structure & module responsibility breakdown.
+   - Agent node implementation patterns using `with_structured_output`.
+   - LangGraph StateGraph compilation code examples.
+   - `requirements.txt` specifications and testing strategy.
+5. **[`specs/developmentPlan.md`](file:///c:/Users/aashv/OneDrive/Desktop/PROJECTS/ai_clinical_documentation_assistant/specs/developmentPlan.md)**: **Phased Development & Verification Plan** containing:
+   - Step-by-step 6-phase implementation roadmap with AI vs. Human task division.
+   - Mandatory Human Verification & Benchmark Gates at the end of each phase.
+   - Explicit passing criteria and testing benchmarks for database setup, agents, LangGraph orchestration, REST API, Streamlit UI, and synthetic evaluation.
 
 ---
 
