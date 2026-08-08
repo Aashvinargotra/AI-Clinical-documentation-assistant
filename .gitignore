@@ -1,0 +1,24 @@
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Environment Variables & Secrets
+.env
+*.pem
+
+# Python Caches & Build Files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+
+# Logs & Temporary Files
+app.log
+*.log
+
+# OS Metadata
+.DS_Store
+Thumbs.db

@@ -15,12 +15,12 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
 - **Human Work:** 
   1. Create Python 3.10+ virtual environment (`python -m venv venv`).
   2. Install dependencies (`pip install -r requirements.txt`).
-  3. Create `.env` from `.env.example` and populate `OPENAI_API_KEY`, `SUPABASE_URL`, and `SUPABASE_KEY`.
+  3. Create `.env` from `.env.example` and populate provider keys (`GROQ_API_KEY`, `NVIDIA_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`).
 
 ### Subphase 1.2: Database DDL Execution & Supabase RLS Setup
 - **AI Work:** Provide complete SQL migration DDL script for `patients`, `consultations`, `clinical_documents`, and `audit_logs` tables along with Row-Level Security (RLS) policies.
 - **Human Work:**
-  1. Open Supabase SQL Editor in browser.
+  1. Open Supabase SQL Editor in browser (`https://bvkdxgavyhbieayxeogu.supabase.co`).
   2. Paste and execute the DDL script.
   3. Insert 2 synthetic test patient rows into `patients` table (`P-98214: John Doe`, `P-98215: Jane Smith`).
   4. Insert 2 synthetic test doctor profiles (`Doctor A: b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e`, `Doctor B: e7f8a9b0-c1d2-3e4f-5a6b-7c8d9e0f1a2b`).
@@ -37,7 +37,7 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
 
 | Verification Checklist Item | Manual Human Test Action | Benchmark / Passing Criteria |
 |---|---|---|
-| **Dependencies Installed** | Run `python -c "import fastapi, langgraph, supabase, openai, tenacity"` | Zero import errors returned |
+| **Dependencies Installed** | Run `python -c "import fastapi, langgraph, langchain, openai, pydantic, supabase, tenacity"` | Zero import errors returned |
 | **Database Schema Active** | Inspect Supabase Table Editor in browser | All 4 tables (`patients`, `consultations`, `clinical_documents`, `audit_logs`) exist with primary keys |
 | **Test Fixture Data Ready** | Query `SELECT * FROM patients;` in Supabase SQL Editor | Returns 2 test patient rows (`P-98214` and `P-98215`) |
 | **SQL RLS Isolation Check** | Execute SQL: `SET LOCAL request.jwt.claim.sub = 'Doctor A UUID'; SELECT * FROM consultations WHERE doctor_id = 'Doctor B UUID';` | Returns **0 rows** (Row-Level Security isolates unauthorized physician data) |
@@ -47,8 +47,8 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
 
 ## Phase 2: Individual AI Agents & Safety Guardrails
 
-### Subphase 2.1: Parallel Agent Nodes Implementation
-- **AI Work:** Implement `backend/agents/history_agent.py` (queries Supabase for past EHR & allergies) and `backend/agents/note_writer.py` (SOAP note structuring) using ChatOpenAI `.with_structured_output()` and `.with_retry(stop_after_attempt=3)`.
+### Subphase 2.1: Parallel Agent Nodes & Provider Rotation Integration
+- **AI Work:** Implement `backend/tools/llm_provider.py` (`LLMRotationManager`) and agent nodes `history_agent.py` & `note_writer.py` using `llm_rotator.invoke_structured_chain_with_failover()`.
 - **Human Work:** Run standalone node execution script providing test `patient_id` and sample transcript.
 
 ### Subphase 2.2: Sequential Agent Nodes & Non-Prescriptive Guardrail
@@ -86,9 +86,9 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
 - **AI Work:** Implement `INTERRUPT_UNRESOLVED_PATIENT` conditional router in `backend/graph/workflow.py` which triggers when History Agent returns `None` for a `patient_id` / `patient_code`.
 - **Human Work:** Trigger graph execution with invalid patient code `"INVALID-99"` and verify execution pauses at interrupt node.
 
-### Subphase 3.3: MemorySaver Checkpointer & Database Retry Wrappers
-- **AI Work:** Integrate `MemorySaver` checkpointer in `workflow.py` and implement `@retry` exponential backoff wrappers (min 1s, max 4s, 3 attempts) in `backend/memory/supabase.py`.
-- **Human Work:** Simulate network drop to verify retry attempts in log output.
+### Subphase 3.3: MemorySaver Checkpointer & Multi-Provider Failover
+- **AI Work:** Integrate `MemorySaver` checkpointer in `workflow.py` and test automatic failover across Groq → NVIDIA → OpenRouter → Gemini → OpenAI in `backend/tools/llm_provider.py`.
+- **Human Work:** Simulate rate-limit error (HTTP 429) on Groq key and verify failover to NVIDIA NIM in log outputs.
 
 ---
 
@@ -98,7 +98,7 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
 |---|---|---|
 | **Fan-Out Concurrency** | Run `pytest tests/test_graph.py -k "test_fanout_execution"` | `history_agent` and `note_writer` execute concurrently without key collision in `MedicalState` |
 | **Interrupt Routing** | Run `pytest tests/test_graph.py -k "test_unresolved_patient_interrupt"` | Graph pauses execution at `INTERRUPT_UNRESOLVED_PATIENT` node when given `"INVALID-99"`; status remains `PROCESSING` |
-| **LLM Retry Exhaustion** | Run `pytest tests/test_graph.py -k "test_llm_retry_exhaustion"` | Simulates 3 failed OpenAI API calls; agent sets `status = "FAILED"` gracefully |
+| **Multi-Provider Failover** | Run `pytest tests/test_graph.py -k "test_llm_provider_failover"` | Simulates 429 on primary key; system seamlessly fails over to next provider and completes execution |
 | **DB Outage Retry & 503** | Run `pytest tests/test_api.py -k "test_db_outage_503"` | Executes 3 exponential retries to Supabase before returning HTTP `503 Service Unavailable` |
 | **Pipeline Latency** | Benchmark total graph execution time for full visit input | Total AI pipeline latency is **< 30 seconds** |
 
@@ -130,7 +130,7 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
 | **Whisper Failure Fallback** | Upload corrupted audio file to `/api/v1/transcribe` | Returns API error (`pytest tests/test_api.py -k "test_whisper_error_fallback"` passes), triggering Streamlit text dictation fallback |
 | **Approval Persistence** | Send POST request to `/api/v1/consultation/{id}/approve` | Writes 1 row to `clinical_documents` and 1 row to `audit_logs` in Supabase |
 | **Rejection Audit Trail** | Send POST request to `/api/v1/consultation/{id}/reject` with reason | `consultations.status` is `'REJECTED'`; 1 audit log entry written; 0 rows written to `clinical_documents` |
-| **RLS API Cross-Doctor Gate** | Run `pytest tests/test_api.py -k "test_rls_cross_doctor_isolation"` | Doctor A receives **HTTP `404 Not Found`** when attempting to fetch Doctor B's consultation ID, preventing record existence leakage |
+| **RLS API Cross-Doctor Gate** | Run `pytest tests/test_api.py -k "test_rls_cross_doctor_isolation"` | Doctor A receives **HTTP `404 Not Found`** when attempting to fetch Doctor B's consultation ID |
 
 ---
 
@@ -169,9 +169,9 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
      - `test_allergy_contraindication_flagging()`
      - `test_incomplete_transcript_reviewer_warning()`
      - `test_audio_dictation_pipeline_end_to_end()`
-  2. **Failure Injection Tests:**
+  2. **Failure Injection & Failover Tests:**
      - `test_unresolved_patient_interrupt()`
-     - `test_llm_retry_exhaustion()`
+     - `test_llm_provider_failover()`
      - `test_whisper_error_fallback()`
      - `test_db_outage_503()`
 - **Human Work:** Execute full automated test suite (`pytest tests/ -v`).
@@ -186,7 +186,7 @@ Every phase concludes with a mandatory **Human Verification & Benchmark Gate** f
 
 | Final Project Benchmark | Verification Method | Passing Criteria (Mandatory for Completion) |
 |---|---|---|
-| **Automated Test Suite Pass Rate** | Run `pytest tests/ -v` | **100% Pass Rate** across all 8 quality and failure-injection tests |
+| **Automated Test Suite Pass Rate** | Run `pytest tests/ -v` | **100% Pass Rate** across all 8 quality, failure-injection, and failover tests |
 | **Zero PHI in Application Logs** | Search `app.log` for patient names or clinical text | **Zero PHI/PII matches** found (metadata logging only) |
 | **Physician Gate Compliance** | Database audit check on `clinical_documents` table | **100% of persisted documents** have corresponding `doctor_id` approval audit log entry |
 | **Non-Prescriptive Guardrail** | Review synthetic evaluation test outputs | **0% unmentioned medications** introduced by AI agents |

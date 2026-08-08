@@ -6,9 +6,9 @@ The **AI Clinical Documentation Assistant** is built adhering to production-grad
 
 ### Core Engineering Principles
 1. **Strict Type Safety & Schema Validation:** All data flowing between agents, backend services, API endpoints, and the database must be validated using Pydantic models (for API endpoints) and Python `TypedDict` (for LangGraph state machine).
-2. **Determinism over Randomness:** LLM calls use temperature `0.0` with structured outputs (`with_structured_output`) to enforce schema adherence and eliminate formatting hallucinations.
+2. **Multi-Provider Key Rotation & Failover:** LLM operations use a resilient key rotation manager (`LLMRotationManager`) supporting Groq, NVIDIA NIM, OpenRouter, Google Gemini, and OpenAI. If any provider hits a rate-limit (HTTP 429) or quota limit, the system automatically fails over to the next provider without crashing.
 3. **Stateless API Gateway with In-Memory Orchestration:** FastAPI backend acts as a stateless gateway, delegating workflow state execution to LangGraph threads.
-4. **Zero-PII Telemetry:** Logs record operational metrics (token count, latency, HTTP status, agent execution timing) without storing raw patient consultation text or protected health information (PHI).
+4. **Zero-PII Telemetry:** Logs record operational metrics (token count, latency, HTTP status, provider failovers, agent execution timing) without storing raw patient consultation text or protected health information (PHI).
 
 ---
 
@@ -44,7 +44,7 @@ ai_clinical_documentation_assistant/
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── whisper.py             <-- OpenAI Whisper audio transcription wrapper
-│   │   └── openai.py              <-- ChatOpenAI client initialization & prompt helpers
+│   │   └── llm_provider.py        <-- Multi-provider LLM key rotation & automatic failover engine
 │   │
 │   ├── schemas/
 │   │   ├── __init__.py
@@ -67,14 +67,10 @@ ai_clinical_documentation_assistant/
 ├── docs/
 │   └── architecture.png           <-- Diagram export
 │
-├── .env.example                   <-- Environment variables template
+├── .env.example                   <-- Environment variables template with rotation keys
 ├── requirements.txt               <-- Python dependency specifications
 └── README.md                      <-- Project overview & documentation index
 ```
-
-> **Type Ownership Rule:**  
-> `MedicalState` is defined **exclusively in `backend/graph/state.py` as a Python `TypedDict`** to support LangGraph's native concurrent-key merging during parallel fan-out.  
-> `backend/schemas/models.py` contains **only API Request/Response Pydantic models** (`SOAPNote`, `MedicalSummary`, `TreatmentPlan`, `FollowupPlan`, `ReviewResult`, `ProcessConsultationRequest`, `ApproveConsultationRequest`, `RejectConsultationRequest`).
 
 ---
 
@@ -84,18 +80,25 @@ ai_clinical_documentation_assistant/
 - **Python:** 3.10 or higher
 - **Git:** 2.30 or higher
 - **Supabase Account:** Active PostgreSQL database project
-- **OpenAI API Key:** Access to `gpt-4o`, `gpt-4o-mini`, and `whisper-1` models
+- **LLM API Keys:** Groq, NVIDIA NIM, OpenRouter, Gemini, or OpenAI API key
 
 ### 3.2 Environment Template (`.env.example`)
 
 Copy `.env.example` to `.env` in the project root directory:
 ```env
-# OpenAI API Configuration
-OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+# Multi-Provider LLM API Configuration (Automatic Key Rotation & Failover)
+GROQ_API_KEY=gsk_your_groq_key
+NVIDIA_API_KEY=nvapi_your_nvidia_key
+GEMINI_API_KEY=your_gemini_key
+OPENROUTER_API_KEY=sk-or-v1_your_openrouter_key
+OPENAI_API_KEY=sk-proj_your_openai_key
+
+# Primary LLM Rotation Order (Comma-separated)
+LLM_PROVIDER_ORDER=groq,nvidia,openrouter,gemini,openai
 
 # Supabase Database Configuration
-SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_KEY=your-supabase-anon-or-service-role-key
+SUPABASE_URL=https://bvkdxgavyhbieayxeogu.supabase.co
+SUPABASE_KEY=sb_publishable_-1t35nLcll3ird2wLmZf6Q_KiXXHGJQ
 
 # Server Configuration
 FASTAPI_HOST=0.0.0.0
@@ -126,17 +129,17 @@ streamlit run frontend/streamlit_app.py
 
 ---
 
-## 5. Agent Development & Safety Guardrail Implementation
+## 5. Agent Development & Multi-Provider Rotation Pattern
 
 ### 5.1 Note Writer Agent Node Pattern
-Every agent node in `backend/agents/` follows a standardized pattern using LangChain's `.with_structured_output()` combined with native retry backoff `.with_retry()`:
+Every agent node in `backend/agents/` utilizes `llm_rotator.invoke_structured_chain_with_failover()`. If one key is rate-limited or exhausted, the rotator automatically fails over to the next provider in the chain (Groq → NVIDIA NIM → OpenRouter → Gemini → OpenAI):
 
 ```python
 # backend/agents/note_writer.py
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from backend.schemas.models import SOAPNote
 from backend.graph.state import MedicalState
+from backend.tools.llm_provider import llm_rotator
 
 SYSTEM_PROMPT = """You are an expert Clinical Note Writer.
 Your task is to convert raw doctor-patient consultation text into a structured SOAP note.
@@ -150,19 +153,18 @@ Rules:
 """
 
 def clinical_note_writer_node(state: MedicalState) -> dict:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
-    structured_llm = llm.with_structured_output(SOAPNote).with_retry(
-        stop_after_attempt=3, # Initial attempt + 2 exponential retries
-        wait_exponential_jitter=True
-    )
-    
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
         ("human", "Consultation Transcript:\n{consultation_text}")
     ])
     
-    chain = prompt | structured_llm
-    result: SOAPNote = chain.invoke({"consultation_text": state["consultation_text"]})
+    # Executes with automatic multi-provider rotation & failover
+    result: SOAPNote = llm_rotator.invoke_structured_chain_with_failover(
+        prompt_template=prompt,
+        input_data={"consultation_text": state["consultation_text"]},
+        schema_model=SOAPNote,
+        temperature=0.0
+    )
     
     return {"soap_note": result.model_dump()}
 ```
@@ -175,10 +177,10 @@ The system enforces a **strict non-prescriptive safety mandate** in `backend/age
 
 ```python
 # backend/agents/treatment_agent.py
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from backend.schemas.models import TreatmentPlan
 from backend.graph.state import MedicalState
+from backend.tools.llm_provider import llm_rotator
 
 TREATMENT_SYSTEM_PROMPT = """You are a Clinical Treatment Formatting Assistant.
 
@@ -189,22 +191,20 @@ CRITICAL SAFETY MANDATE (STRICT NON-PRESCRIPTIVE GUARDRAIL):
 """
 
 def treatment_planner_node(state: MedicalState) -> dict:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
-    structured_llm = llm.with_structured_output(TreatmentPlan).with_retry(
-        stop_after_attempt=3,
-        wait_exponential_jitter=True
-    )
-    
     prompt = ChatPromptTemplate.from_messages([
         ("system", TREATMENT_SYSTEM_PROMPT),
         ("human", "SOAP Plan:\n{soap_plan}\n\nPatient History Allergies:\n{allergies}")
     ])
     
-    chain = prompt | structured_llm
-    result: TreatmentPlan = chain.invoke({
-        "soap_plan": state["soap_note"].get("plan", ""),
-        "allergies": state["history"].get("allergies", [])
-    })
+    result: TreatmentPlan = llm_rotator.invoke_structured_chain_with_failover(
+        prompt_template=prompt,
+        input_data={
+            "soap_plan": state["soap_note"].get("plan", ""),
+            "allergies": state["history"].get("allergies", [])
+        },
+        schema_model=TreatmentPlan,
+        temperature=0.0
+    )
     
     return {"treatment_plan": result.model_dump()}
 ```
@@ -216,7 +216,7 @@ def treatment_planner_node(state: MedicalState) -> dict:
 | Design.md §4.4 Failure Case | Target File | Implementation Mechanism & Behavior |
 |---|---|---|
 | **1. Unresolved Patient Record** | `backend/graph/workflow.py` | `INTERRUPT_UNRESOLVED_PATIENT` conditional edge triggers when History Agent returns `None`. Pauses execution and prompts UI for patient lookup. |
-| **2. LLM Timeout / Rate Limit** | `backend/agents/*` | `.with_retry(stop_after_attempt=3)` handles 2 exponential backoff retries. On exhaustion, sets `status = "FAILED"`. |
+| **2. LLM Provider Key Exhaustion** | `backend/tools/llm_provider.py` | `LLMRotationManager` detects HTTP 429/quota error, logs failover warning, and automatically retries request via Groq → NVIDIA → OpenRouter → Gemini → OpenAI chain. |
 | **3. Whisper Audio Failure** | `backend/api/endpoints.py` | Catch audio exception in FastAPI endpoint, set `status = "FAILED"`, and trigger Streamlit fallback text-dictation editor. |
 | **4. Backend Process Restart** | `backend/graph/workflow.py` | `MemorySaver` in-process RAM reset mid-pipeline prompts doctor in Streamlit to re-trigger consultation execution. |
 | **5. Supabase DB Outage** | `backend/memory/supabase.py` | `@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=4))` wrapper. On failure, returns HTTP `503`, preserving edits in active session. |
@@ -310,9 +310,9 @@ pytest tests/ -v
    - Verify `Treatment Planner` raises a validation error if unmentioned medications are introduced.
    - Verify `Documentation Reviewer` output includes `passed_qc: bool` and flags missing fields.
 
-2. **Graph Workflow & Failure Mode Tests (`tests/test_graph.py`):**
+2. **Graph Workflow & Provider Rotation Tests (`tests/test_graph.py`):**
+   - **Multi-Provider Failover Test:** Verify `LLMRotationManager` automatically fails over to NVIDIA NIM when Groq returns HTTP 429.
    - **Unresolved Patient Interrupt:** Verify conditional router redirects to `INTERRUPT_UNRESOLVED_PATIENT` when history lookup returns `None`.
-   - **LLM Retry Backoff:** Verify agent node retries 2 times on simulated API rate-limit exception before raising failure.
    - **Parallel Fan-Out Key Merge:** Verify `history_agent` and `note_writer` execution results merge without key collision in `MedicalState`.
 
 3. **API Endpoint & Outage Tests (`tests/test_api.py`):**
@@ -329,11 +329,11 @@ pytest tests/ -v
    {
      "timestamp": "2026-08-08T14:55:00Z",
      "level": "INFO",
-     "event": "AGENT_NODE_COMPLETED",
-     "agent": "note_writer",
+     "event": "PROVIDER_FAILOVER",
+     "failed_provider": "Groq",
+     "active_provider": "NVIDIA NIM",
      "consultation_id": "c7b2e8a1-4f90-41a2-8e3b-9a8f21e0b1a2",
-     "latency_ms": 845,
-     "tokens_used": 612
+     "latency_ms": 1150
    }
    ```
 2. **Environment Variables Security:** Never commit `.env` or credentials to git repository (`.gitignore` enforces `.env` exclusion).

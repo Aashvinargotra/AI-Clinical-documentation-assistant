@@ -8,6 +8,7 @@ The **AI Clinical Documentation Assistant** is a multi-agent system designed to 
 - **Human-in-the-Loop (HITL) Safety Mandatory:** The system acts strictly as an administrative drafting assistant. AI agents **summarize, format, and flag warnings**—they never prescribe medications, alter medical decisions, or independently persist records without explicit physician review and approval.
 - **Structured JSON Handoffs:** Agents communicate via strictly validated JSON schemas rather than unstructured natural language, ensuring predictable rendering and programmatic validation.
 - **Parallel Fan-Out Execution:** Non-dependent tasks (fetching patient history vs. parsing consultation transcript) run concurrently to minimize latency.
+- **Multi-Provider Key Rotation & Resilience:** LLM operations utilize a resilient rotation manager supporting Groq, NVIDIA NIM, OpenRouter, Google Gemini, and OpenAI. If one key is rate-limited or exhausted, the system automatically fails over to the next provider.
 
 ---
 
@@ -75,6 +76,13 @@ The **AI Clinical Documentation Assistant** is a multi-agent system designed to 
                              │  Supabase PostgreSQL Storage    │
                              └─────────────────────────────────┘
 ```
+
+### Component Breakdown
+1. **Frontend (Streamlit):** Web UI providing patient lookup, consultation text/audio entry, real-time agent execution tracking, interactive document editing, and single-click approval.
+2. **API Gateway (FastAPI):** Exposes RESTful endpoints for audio transcription, state initialization, approval processing, and database querying.
+3. **Orchestrator (LangGraph):** Manages agent state transitions, parallel fan-out execution, sequential downstream dependency routing, and human-in-the-loop interruption.
+4. **Agent Network & Multi-Provider Rotation:** 6 specialized LLM nodes operating under structured JSON output constraints with automatic key rotation and failover across **Groq** (`llama-3.3-70b-versatile`), **NVIDIA NIM** (`meta/llama-3.3-70b-instruct`), **OpenRouter** (`meta-llama/llama-3.3-70b-instruct`), **Google Gemini** (`gemini-1.5-flash`), and **OpenAI** (`gpt-4o-mini`).
+5. **Database (Supabase PostgreSQL):** Stores long-term patient records, structured clinical notes, consultation transcripts, and HIPAA compliance audit logs.
 
 ---
 
@@ -346,7 +354,6 @@ Each of the 6 agents adheres to strict input/output contracts:
   "timestamp": "2026-08-07T23:10:05Z"
 }
 ```
-*(Note: Rejection updates `consultations.status = 'REJECTED'` and writes an audit log entry with `action = 'CONSULTATION_REJECTED'` and `metadata = {"rejection_reason": "Inaccurate transcript uploaded"}`.)*
 
 ---
 
@@ -356,9 +363,10 @@ Each of the 6 agents adheres to strict input/output contracts:
 - If the provided `patient_id` / `patient_code` fails to resolve to a valid row in the `patients` table during the History Agent lookup, the graph router redirects state to `INTERRUPT_UNRESOLVED_PATIENT`.
 - **System Action:** Status remains `PROCESSING` (paused at interrupt node); Streamlit UI prompts the physician to search for an existing patient or create a new patient profile before execution resumes.
 
-#### 2. LLM Rate Limit / Timeout Handling
-- LLM calls execute with an initial attempt plus 2 exponential retries (`max_retries=2` / `stop_after_attempt=3`).
-- **Failure Transition:** If retries exhaust without success, the orchestrator sets `status = "FAILED"` and logs the exception. The UI displays an error notification giving the physician the option to retry execution or proceed with manual text editing.
+#### 2. LLM Key Exhaustion & Failover (`LLMRotationManager`)
+- LLM requests automatically rotate across Groq, NVIDIA NIM, OpenRouter, Google Gemini, and OpenAI.
+- If one key hits a rate limit (HTTP 429) or quota limit, the rotator logs a warning and retries with the next provider.
+- If all configured provider keys fail, `status = "FAILED"` is set and a fallback error is surfaced.
 
 #### 3. Whisper Audio Transcription Failure
 - If audio upload decoding fails or the Whisper API returns an HTTP error, the gateway catches the exception, updates `consultations.status = "FAILED"`, and returns a clear API error response.
@@ -457,7 +465,7 @@ The Streamlit UI is structured into **3 core screens**:
 |  +-----------------------------------------------------------------+  |
 +-----------------------------------------------------------------------+
 |  ACTIONS                                                              |
-|  [ EDIT ALL FIELDS ]     [ REJECT & DISCARD ]     [ APPROVE & SAVE ]  |
+|  [ EDIT ALL FIELDS ]     [ REJECT CONSULTATION ]  [ APPROVE & SAVE ]  |
 +-----------------------------------------------------------------------+
 ```
 
@@ -470,7 +478,7 @@ The Streamlit UI is structured into **3 core screens**:
    - The `Documentation Reviewer` runs cross-checks between `transcript` vs `medications`.
 
 2. **Data Privacy (HIPAA Alignment):**
-   - Application execution logs do **not** log patient PII or raw text—only token counts, agent IDs, latencies, and execution status.
+   - Application execution logs do **not** log patient PII or raw text—only token counts, agent IDs, latencies, provider failovers, and execution status.
    - Database queries enforced via Supabase Row-Level Security (RLS) policies scoped to `doctor_id`.
 
 3. **Auditability (Metadata-Only):**
@@ -486,7 +494,9 @@ ai_clinical_documentation_assistant/
 ├── specs/
 │   ├── idea.md                    <-- Requirements, problem statement & rubric scope
 │   ├── design.md                  <-- Single Canonical Master Design Spec
-│   └── engineering.md             <-- Technical execution & developer guide
+│   ├── engineering.md             <-- Technical execution & developer guide
+│   ├── product.md                 <-- Product vision & user experience
+│   └── developmentPlan.md         <-- Phased roadmap & verification gates
 │
 ├── backend/
 │   ├── agents/
@@ -506,7 +516,7 @@ ai_clinical_documentation_assistant/
 │   │
 │   ├── tools/
 │   │   ├── whisper.py
-│   │   └── openai.py
+│   │   └── llm_provider.py        <-- Multi-Provider Key Rotation & Failover System
 │   │
 │   ├── schemas/
 │   │   └── models.py              <-- API Request/Response Pydantic models ONLY
