@@ -122,10 +122,19 @@ class LLMRotationManager:
             try:
                 logger.info(f"Attempting execution using LLM Provider: {provider_name}")
                 llm = self.get_llm_instance(provider_id, temperature=temperature)
-                structured_llm = llm.with_structured_output(schema_model)
-                chain = prompt_template | structured_llm
-                
-                result = chain.invoke(input_data)
+                try:
+                    structured_llm = llm.with_structured_output(schema_model)
+                    chain = prompt_template | structured_llm
+                    result = chain.invoke(input_data)
+                except Exception as inner_exc:
+                    if "json_schema" in str(inner_exc).lower() or "400" in str(inner_exc):
+                        logger.info(f"Retrying provider {provider_name} using method='json_mode'...")
+                        structured_llm = llm.with_structured_output(schema_model, method="json_mode")
+                        chain = prompt_template | structured_llm
+                        result = chain.invoke(input_data)
+                    else:
+                        raise inner_exc
+
                 logger.info(f"Successfully executed chain with provider: {provider_name}")
                 return result
 
@@ -133,8 +142,8 @@ class LLMRotationManager:
                 error_msg = str(exc).lower()
                 logger.warning(f"Provider {provider_name} failed with error: {exc}")
                 
-                # If rate limit (429), quota exhausted, or auth error, mark provider in cooldown and failover
-                if any(term in error_msg for term in ["429", "rate limit", "quota", "exceeded", "401", "unauthorized", "invalid_api_key"]):
+                # If rate limit (429), quota exhausted, auth error, or model/schema incompatibility, mark provider in cooldown and failover
+                if any(term in error_msg for term in ["429", "400", "404", "rate limit", "quota", "exceeded", "401", "unauthorized", "invalid_api_key", "does not support", "json_schema"]):
                     self.failed_providers[provider_id] = time.time()
                     logger.warning(f"Marking provider '{provider_name}' in 5-minute cooldown. Failing over to next provider...")
                 
