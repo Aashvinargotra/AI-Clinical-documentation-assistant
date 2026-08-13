@@ -46,6 +46,10 @@ def generate_followup_plan(treatment_plan: Dict[str, Any], summary: Dict[str, An
 def followup_coordinator_node(state: MedicalState) -> Dict[str, Any]:
     """LangGraph node execution function for Follow-up Coordinator Agent."""
     logger.info("Executing Follow-up Coordinator Agent node...")
+    history = state.get("history", {})
+    if history and history.get("patient_unresolved"):
+        logger.warning("Follow-up Coordinator Agent skipped: patient_unresolved is True.")
+        return {}
     treatment_plan = state.get("treatment_plan", {})
     summary = state.get("summary", {})
     

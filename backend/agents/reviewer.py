@@ -62,5 +62,9 @@ def review_clinical_documentation(state: MedicalState) -> ReviewResult:
 def documentation_reviewer_node(state: MedicalState) -> Dict[str, Any]:
     """LangGraph node execution function for Documentation Reviewer Agent."""
     logger.info("Executing Documentation Reviewer Agent node...")
+    history = state.get("history", {})
+    if history and history.get("patient_unresolved"):
+        logger.warning("Documentation Reviewer Agent skipped: patient_unresolved is True.")
+        return {}
     review_obj = review_clinical_documentation(state)
     return {"review_result": review_obj.model_dump()}

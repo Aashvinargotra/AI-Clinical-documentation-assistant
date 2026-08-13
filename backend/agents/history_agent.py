@@ -1,7 +1,10 @@
 import os
 import logging
+from typing import Dict, Any
 from supabase import create_client, Client
 from dotenv import load_dotenv
+
+from backend.graph.state import MedicalState
 
 load_dotenv()
 logger = logging.getLogger("history_agent")
@@ -32,3 +35,41 @@ def fetch_patient_history(patient_code: str) -> dict:
     except Exception as exc:
         logger.error(f"Error fetching patient history: {exc}")
         return None
+
+
+def patient_history_node(state: MedicalState) -> Dict[str, Any]:
+    """LangGraph node execution function for History Agent."""
+    logger.info("Executing History Agent node...")
+    patient_code = state.get("patient_id", "")
+    history_data = fetch_patient_history(patient_code)
+
+    if not history_data:
+        logger.warning(f"History Agent: patient_code '{patient_code}' unresolved.")
+        return {
+            "history": {
+                "patient_unresolved": True,
+                "allergies": [],
+                "chronic_conditions": [],
+                "current_medications": [],
+                "risk_flags": []
+            }
+        }
+
+    allergies = history_data.get("allergies", [])
+    chronic_conditions = history_data.get("chronic_conditions", [])
+    current_medications = history_data.get("current_medications", [])
+
+    risk_flags = []
+    for allergy in allergies:
+        risk_flags.append(f"Allergy Alert: {allergy}")
+
+    return {
+        "history": {
+            "allergies": allergies,
+            "chronic_conditions": chronic_conditions,
+            "current_medications": current_medications,
+            "risk_flags": risk_flags,
+            "patient_unresolved": False
+        }
+    }
+

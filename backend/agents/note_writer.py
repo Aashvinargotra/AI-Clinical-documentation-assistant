@@ -1,6 +1,12 @@
+import logging
+from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
 from backend.tools.llm_provider import llm_rotator
 from backend.schemas.models import SOAPNote
+from backend.graph.state import MedicalState
+
+logger = logging.getLogger("note_writer")
+
 
 def generate_soap_note(transcript: str) -> SOAPNote:
     """Generates a structured SOAP note from a raw medical transcript."""
@@ -15,3 +21,12 @@ def generate_soap_note(transcript: str) -> SOAPNote:
         schema_model=SOAPNote
     )
     return result
+
+
+def clinical_note_writer_node(state: MedicalState) -> Dict[str, Any]:
+    """LangGraph node execution function for Note Writer Agent."""
+    logger.info("Executing Note Writer Agent node...")
+    consultation_text = state.get("consultation_text", "")
+    soap_obj = generate_soap_note(consultation_text)
+    return {"soap_note": soap_obj.model_dump()}
+

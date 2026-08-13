@@ -60,8 +60,11 @@ def generate_treatment_plan(soap_plan: str, allergies: List[str]) -> TreatmentPl
 def treatment_planner_node(state: MedicalState) -> Dict[str, Any]:
     """LangGraph node execution function for Treatment Planner Agent."""
     logger.info("Executing Treatment Planner Agent node...")
-    soap_note = state.get("soap_note", {})
     history = state.get("history", {})
+    if history and history.get("patient_unresolved"):
+        logger.warning("Treatment Planner Agent skipped: patient_unresolved is True.")
+        return {}
+    soap_note = state.get("soap_note", {})
     
     soap_plan = soap_note.get("plan", "")
     allergies = history.get("allergies", [])

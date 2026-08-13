@@ -46,8 +46,11 @@ def generate_medical_summary(soap_note: Dict[str, Any], history: Dict[str, Any])
 def medical_summary_node(state: MedicalState) -> Dict[str, Any]:
     """LangGraph node execution function for Medical Summary Agent."""
     logger.info("Executing Medical Summary Agent node...")
-    soap_note = state.get("soap_note", {})
     history = state.get("history", {})
+    if history and history.get("patient_unresolved"):
+        logger.warning("Medical Summary Agent skipped: patient_unresolved is True.")
+        return {}
+    soap_note = state.get("soap_note", {})
     
     summary_obj = generate_medical_summary(soap_note, history)
     return {"summary": summary_obj.model_dump()}
