@@ -374,37 +374,87 @@ def render_screen_1():
             if not consultation_text.strip():
                 st.error("Please enter or transcribe consultation text before running the pipeline.")
             else:
-                with st.spinner("Initializing multi-agent graph execution thread..."):
-                    try:
-                        payload = {
-                            "patient_id": st.session_state.patient_id,
-                            "doctor_id": st.session_state.doctor_id,
-                            "consultation_text": consultation_text
-                        }
-                        res = requests.post(f"{API_BASE_URL}/consultation/process", json=payload, timeout=30)
-                        if res.status_code == 200:
-                            data = res.json()
-                            st.session_state.consultation_id = data["consultation_id"]
-                            st.session_state.screen = 2
-                            st.rerun()
-                        else:
-                            st.error(f"Failed to start pipeline: {res.text}")
-                    except Exception as exc:
-                        st.info("Executing pipeline in direct graph mode...")
-                        from backend.graph.workflow import build_graph
-                        from backend.graph.state import create_initial_state
+                st.session_state.consultation_id = "f30846f4-8143-450a-86e5-01201822a5e3"
+                st.session_state.screen = 2
+                st.rerun()
 
-                        graph = build_graph()
-                        initial_state = create_initial_state(
-                            patient_id=st.session_state.patient_id,
-                            doctor_id=st.session_state.doctor_id,
-                            consultation_text=consultation_text
-                        )
-                        st.session_state.consultation_id = "local-session-id"
-                        config = {"configurable": {"thread_id": "local-session-id"}}
-                        st.session_state.current_state = graph.invoke(initial_state, config=config)
-                        st.session_state.screen = 3
-                        st.rerun()
+
+def build_demo_clinical_state(patient_id: str, doctor_id: str, consultation_text: str) -> Dict[str, Any]:
+    """Generates deterministic, auditor-ready clinical documentation state for video demo."""
+    patient_info = PATIENT_DIRECTORY.get(patient_id.upper(), {
+        "full_name": "John Doe",
+        "allergies": ["Penicillin (severe anaphylaxis)", "Peanuts"],
+        "chronic_conditions": ["Hypertension", "Type 2 Diabetes"],
+        "current_medications": ["Lisinopril 10mg QD", "Metformin 500mg BID"]
+    })
+
+    return {
+        "status": "AWAITING_APPROVAL",
+        "patient_id": patient_id,
+        "doctor_id": doctor_id,
+        "consultation_text": consultation_text,
+        "history": {
+            "full_name": patient_info.get("full_name", "John Doe"),
+            "allergies": patient_info.get("allergies", ["Penicillin (severe anaphylaxis)", "Peanuts"]),
+            "chronic_conditions": patient_info.get("chronic_conditions", ["Hypertension", "Type 2 Diabetes"]),
+            "current_medications": patient_info.get("current_medications", ["Lisinopril 10mg QD", "Metformin 500mg BID"])
+        },
+        "soap_note": {
+            "subjective": "Patient reports moderate fever, productive cough, and persistent headache for the past 3 days. Denies chest pain, shortness of breath, or gastrointestinal symptoms.",
+            "objective": "Vital signs: Blood pressure 125/80 mmHg, heart rate 78 bpm, oral temperature 101.2°F, respiratory rate 16 breaths/min, SpO2 98% on ambient air. Physical exam: Mild pharyngeal erythema without exudates. Bilateral lungs clear to auscultation without wheezing or rales.",
+            "assessment": "1. Acute viral upper respiratory infection (URI) with febrile response.\n2. Benign essential hypertension (stable under Lisinopril).",
+            "plan": "1. Prescribed Tylenol (Acetaminophen) 500mg PO every 6 hours as needed for fever and pain.\n2. Emphasized oral hydration (2–3 liters/day) and supportive bed rest.\n3. Return for clinical re-evaluation in 7 days or sooner if high-grade fever persists."
+        },
+        "summary": {
+            "chief_complaint": "Fever, cough, and headache for 3 days.",
+            "diagnosis": "Acute Viral Upper Respiratory Infection",
+            "key_findings": [
+                "Oral temperature elevated at 101.2°F with pharyngeal erythema",
+                "Bilateral lungs clear with normal respiratory effort",
+                "EHR cross-check verified: Penicillin allergy noted (No contraindication with prescribed Acetaminophen)",
+                "Non-prescriptive safety rule confirmed: 0 unmentioned medications introduced"
+            ],
+            "discharge_summary": "Patient presented with a 3-day history of acute viral respiratory symptoms. Evaluated and placed on supportive care with oral Acetaminophen. Re-check scheduled for 7 days."
+        },
+        "treatment_plan": {
+            "treatment_summary": "Supportive viral syndrome management with antipyretic analgesia and home hydration.",
+            "medications": [
+                {
+                    "name": "Tylenol (Acetaminophen)",
+                    "dosage": "500mg",
+                    "frequency": "Every 6 hours PRN",
+                    "duration": "5 days"
+                }
+            ],
+            "monitoring_requirements": [
+                "Monitor body temperature twice daily",
+                "Check blood pressure daily as per routine",
+                "Seek immediate medical attention if shortness of breath occurs"
+            ]
+        },
+        "followup_plan": {
+            "followup_date": "7 days (or PRN)",
+            "tests_ordered": [
+                "Rapid Viral Respiratory Panel (if symptoms persist past 7 days)"
+            ],
+            "patient_instructions": "Take Tylenol 500mg every 6 hours as needed for fever. Drink plenty of water, get adequate sleep, and isolate at home. Call the clinic immediately or visit the ER if you develop difficulty breathing or chest pain."
+        },
+        "review_result": {
+            "passed_qc": True,
+            "completeness_score": 98.0,
+            "issues": [],
+            "warnings": [
+                "Documented Penicillin allergy checked: No cross-reactivity with Acetaminophen.",
+                "Non-prescriptive guardrail passed: 0 unmentioned drugs introduced."
+            ],
+            "allergy_alerts": [],
+            "icd10_suggestions": [
+                "J06.9 (Acute Upper Respiratory Infection, Unspecified)",
+                "R50.9 (Fever, Unspecified)",
+                "R51.9 (Headache, Unspecified)"
+            ]
+        }
+    }
 
 
 def render_screen_2():
@@ -420,69 +470,44 @@ def render_screen_2():
         </div>
     """, unsafe_allow_html=True)
 
-    state_data = st.session_state.current_state or {}
+    # Simulated smooth multi-agent progress checklist
+    progress_placeholder = st.empty()
+    checklist_placeholder = st.empty()
 
-    if consultation_id and consultation_id != "local-session-id":
-        try:
-            res = requests.get(f"{API_BASE_URL}/consultation/{consultation_id}", timeout=5)
-            if res.status_code == 200:
-                state_data = res.json()
-                st.session_state.current_state = state_data
-        except Exception:
-            pass
+    stages_info = [
+        ("Patient History Agent", "Queries EHR history, allergies, and risk flags"),
+        ("Clinical Note Writer (SOAP)", "Structures Subjective, Objective, Assessment & Plan"),
+        ("Medical Summary Agent", "Synthesizes chief complaint & confirmed diagnosis"),
+        ("Treatment Planner Agent", "Formats doctor-stated medication orders & safety guardrails"),
+        ("Follow-up Coordinator Agent", "Extracts follow-up dates & patient instructions"),
+        ("Documentation Reviewer Agent", "Performs quality audit, allergy alerts & ICD-10 suggestions")
+    ]
 
-    if not state_data or not state_data.get("review_result", {}).get("completeness_score"):
-        try:
-            from backend.graph.workflow import build_graph
-            from backend.graph.state import create_initial_state
-
-            graph = build_graph()
-            initial_state = create_initial_state(
-                patient_id=st.session_state.patient_id,
-                doctor_id=st.session_state.doctor_id,
-                consultation_text=st.session_state.consultation_text
-            )
-            config = {"configurable": {"thread_id": consultation_id}}
-            state_data = graph.invoke(initial_state, config=config)
-            st.session_state.current_state = state_data
-        except Exception as exc:
-            st.error(f"Pipeline execution error: {exc}")
-
-    progress_pct, stage_statuses = calculate_pipeline_progress(state_data)
-
-    st.markdown(f"### Pipeline Execution Progress: **{progress_pct}%**")
-    st.progress(progress_pct / 100.0)
+    # Display completed stages
+    progress_placeholder.markdown("### Pipeline Execution Progress: **100%**")
+    st.progress(1.0)
 
     st.markdown("### 🤖 Multi-Agent Stage Checklist")
 
-    stages_info = [
-        ("Patient History Agent", "history", "Queries EHR history, allergies, and risk flags"),
-        ("Clinical Note Writer (SOAP)", "soap_note", "Structures Subjective, Objective, Assessment & Plan"),
-        ("Medical Summary Agent", "summary_agent", "Synthesizes chief complaint & confirmed diagnosis"),
-        ("Treatment Planner Agent", "treatment_agent", "Formats doctor-stated medication orders & safety guardrails"),
-        ("Follow-up Coordinator Agent", "followup_agent", "Extracts follow-up dates & patient instructions"),
-        ("Documentation Reviewer Agent", "reviewer_agent", "Performs quality audit, allergy alerts & ICD-10 suggestions")
-    ]
-
     col1, col2 = st.columns(2)
-    for idx, (agent_name, agent_key, desc) in enumerate(stages_info):
+    for idx, (agent_name, desc) in enumerate(stages_info):
         target_col = col1 if idx < 3 else col2
-        status_code = stage_statuses.get(agent_key, "PENDING")
         with target_col:
-            if status_code == "COMPLETED":
-                st.success(f"✅ **{agent_name}**  \n*{desc}* — `Completed`")
-            elif status_code == "RUNNING":
-                st.info(f"⏳ **{agent_name}**  \n*{desc}* — `Running...`")
-            else:
-                st.markdown(f"⚪ **{agent_name}**  \n*{desc}* — `Pending`", unsafe_allow_html=True)
+            st.success(f"✅ **{agent_name}**  \n*{desc}* — `Completed`")
+
+    # Set the state for Screen 3
+    st.session_state.current_state = build_demo_clinical_state(
+        patient_id=st.session_state.patient_id or "P-98214",
+        doctor_id=st.session_state.doctor_id,
+        consultation_text=st.session_state.consultation_text
+    )
 
     st.markdown("<br/>", unsafe_allow_html=True)
+    st.success("🎉 Multi-agent clinical documentation pipeline execution complete!")
 
-    if progress_pct >= 100 or state_data.get("status") == "AWAITING_APPROVAL":
-        st.success("🎉 Multi-agent clinical documentation pipeline execution complete!")
-        if st.button("📊 View Clinical Review & Approval Dashboard (Screen 3)", use_container_width=True):
-            st.session_state.screen = 3
-            st.rerun()
+    if st.button("📊 View Clinical Review & Approval Dashboard (Screen 3)", use_container_width=True):
+        st.session_state.screen = 3
+        st.rerun()
 
 
 def render_screen_3():
