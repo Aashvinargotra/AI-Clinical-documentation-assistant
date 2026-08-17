@@ -21,10 +21,16 @@ logger = logging.getLogger("llm_provider_rotator")
 
 # Define provider configurations utilizing OpenAI-compatible REST endpoints
 PROVIDER_CONFIGS = {
+    "gemini": {
+        "name": "Google Gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "default_model": "gemini-3.6-flash",
+        "api_key_env": "GEMINI_API_KEY"
+    },
     "groq": {
         "name": "Groq",
         "base_url": "https://api.groq.com/openai/v1",
-        "default_model": "openai/gpt-oss-20b",
+        "default_model": "qwen/qwen3.6-27b",
         "api_key_env": "GROQ_API_KEY"
     },
     "nvidia": {
@@ -38,12 +44,6 @@ PROVIDER_CONFIGS = {
         "base_url": "https://openrouter.ai/api/v1",
         "default_model": "meta-llama/llama-3.3-70b-instruct",
         "api_key_env": "OPENROUTER_API_KEY"
-    },
-    "gemini": {
-        "name": "Google Gemini",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "default_model": "gemini-2.0-flash",
-        "api_key_env": "GEMINI_API_KEY"
     },
     "openai": {
         "name": "OpenAI",
@@ -59,7 +59,7 @@ class LLMRotationManager:
 
     def __init__(self, provider_order: Optional[List[str]] = None):
         if provider_order is None:
-            order_str = os.getenv("LLM_PROVIDER_ORDER", "groq,nvidia,openrouter,gemini,openai")
+            order_str = os.getenv("LLM_PROVIDER_ORDER", "gemini,groq,nvidia,openrouter,openai")
             provider_order = [p.strip().lower() for p in order_str.split(",") if p.strip()]
 
         self.provider_order = provider_order
