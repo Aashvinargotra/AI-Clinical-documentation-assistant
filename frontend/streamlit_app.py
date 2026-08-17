@@ -7,11 +7,18 @@ Provides a 3-screen clinical workflow:
 """
 
 import os
+import sys
 import time
+from pathlib import Path
 import requests
 import pandas as pd
 import streamlit as st
 from typing import Dict, Any, Optional, Tuple
+
+# Ensure project root is in sys.path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 # API Server base URL
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
