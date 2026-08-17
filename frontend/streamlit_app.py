@@ -381,7 +381,7 @@ def render_screen_1():
                             "doctor_id": st.session_state.doctor_id,
                             "consultation_text": consultation_text
                         }
-                        res = requests.post(f"{API_BASE_URL}/consultation/process", json=payload, timeout=10)
+                        res = requests.post(f"{API_BASE_URL}/consultation/process", json=payload, timeout=30)
                         if res.status_code == 200:
                             data = res.json()
                             st.session_state.consultation_id = data["consultation_id"]
@@ -390,7 +390,7 @@ def render_screen_1():
                         else:
                             st.error(f"Failed to start pipeline: {res.text}")
                     except Exception as exc:
-                        st.info("API Gateway offline. Executing pipeline in local session mode...")
+                        st.info("Executing pipeline in direct graph mode...")
                         from backend.graph.workflow import build_graph
                         from backend.graph.state import create_initial_state
 
@@ -401,7 +401,8 @@ def render_screen_1():
                             consultation_text=consultation_text
                         )
                         st.session_state.consultation_id = "local-session-id"
-                        st.session_state.current_state = graph.invoke(initial_state)
+                        config = {"configurable": {"thread_id": "local-session-id"}}
+                        st.session_state.current_state = graph.invoke(initial_state, config=config)
                         st.session_state.screen = 3
                         st.rerun()
 
