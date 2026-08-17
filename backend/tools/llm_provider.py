@@ -24,7 +24,7 @@ PROVIDER_CONFIGS = {
     "groq": {
         "name": "Groq",
         "base_url": "https://api.groq.com/openai/v1",
-        "default_model": "llama-3.3-70b-versatile",
+        "default_model": "openai/gpt-oss-20b",
         "api_key_env": "GROQ_API_KEY"
     },
     "nvidia": {
@@ -96,6 +96,8 @@ class LLMRotationManager:
             "model": config["default_model"],
             "temperature": temperature,
             "api_key": api_key,
+            "timeout": 15.0,
+            "max_retries": 1
         }
         if config["base_url"]:
             kwargs["base_url"] = config["base_url"]
